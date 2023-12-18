@@ -216,7 +216,7 @@ pub fn convertModule(module: wasm_core.Module, allocator: std.mem.Allocator) ![]
 
         std.debug.print("------------\n", .{});
         stack.print();
-        
+
         switch (instruction.opcode) {
             .i32_sub, .i64_sub => {
                 if (i < 2)

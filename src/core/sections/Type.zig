@@ -1,4 +1,6 @@
+const std = @import("std");
+const ArrayList = std.ArrayList;
 const wasm = @import("../wasm.zig");
 
-params: []const wasm.ValType,
-returns: []const wasm.ValType,
+params: ArrayList(wasm.ValType),
+returns: ArrayList(wasm.ValType),

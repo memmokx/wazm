@@ -1,3 +1,5 @@
+const std = @import("std");
+const ArrayList = std.ArrayList;
 const Instruction = @import("../Instruction.zig");
 const wasm = @import("../wasm.zig");
 
@@ -6,5 +8,5 @@ pub const Local = struct {
     count: u32,
 };
 
-locals: []const Local,
-body: []const Instruction,
+locals: ArrayList(Local),
+body: ArrayList(Instruction),

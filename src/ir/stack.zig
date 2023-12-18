@@ -54,9 +54,9 @@ pub fn Stack(comptime T: type) type {
 
         pub fn print(self: Self) void {
             var tmp: ?*Node = self.top;
-            while (tmp != null) : (tmp = tmp.?.next){
+            while (tmp != null) : (tmp = tmp.?.next) {
                 std.debug.print("stack: {}\n", .{tmp.?.data});
-            }    
+            }
         }
     };
 }

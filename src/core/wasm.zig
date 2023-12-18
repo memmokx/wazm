@@ -1,4 +1,5 @@
 const std = @import("std");
+const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const Allocator = std.mem.Allocator;
 const leb = std.leb;
 const meta = std.meta;
