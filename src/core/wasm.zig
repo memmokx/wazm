@@ -540,6 +540,14 @@ pub const SectionId = enum(u8) {
 pub const Limits = struct {
     min: u32,
     max: ?u32,
+
+    pub fn lebSize(self: Limits) u32 {
+        if (self.max) |max| {
+            return lebEncodedSize(self.min) + 1 + lebEncodedSize(max);
+        }
+
+        return lebEncodedSize(self.min) + 1;
+    }
 };
 
 pub const InitExpression = union(enum) {
@@ -569,6 +577,7 @@ pub fn readEnum(comptime T: type, reader: anytype) !T {
     }
 }
 
+/// Reads the `Limits` type using leb
 pub fn readLimits(reader: anytype) !Limits {
     const flag = try readLeb(u1, reader);
     const min = try readLeb(u32, reader);
@@ -579,15 +588,73 @@ pub fn readLimits(reader: anytype) !Limits {
     };
 }
 
-pub fn readVec(ptr: anytype, reader: anytype, gpa: Allocator) ![]ElementType(@TypeOf(ptr)) {
-    const len = try readLeb(u32, reader);
-    const slice = try gpa.alloc(ElementType(@TypeOf(ptr)), len);
-    ptr.* = slice;
-    return slice;
+/// Writes the `Limits` type using leb encoding
+pub fn writeLimits(limits: Limits, writer: anytype) !void {
+    const flag: u1 = if (limits.max == null) 0 else 1;
+
+    try leb.writeULEB128(writer, flag);
+    try leb.writeULEB128(writer, limits.min);
+    if (limits.max) |max| {
+        try leb.writeULEB128(writer, max);
+    }
 }
 
-fn ElementType(comptime ptr: type) type {
-    return meta.Elem(meta.Child(ptr));
+/// Writes an enum `T` using leb
+pub fn writeEnum(comptime T: type, writer: anytype, value: T) !void {
+    switch (@typeInfo(T)) {
+        .Enum => |enum_type| switch (@typeInfo(enum_type.tag_type).Int.signedness) {
+            .signed => try leb.writeILEB128(writer, @as(enum_type.tag_type, @intFromEnum(value))),
+            .unsigned => try leb.writeULEB128(writer, @as(enum_type.tag_type, @intFromEnum(value))),
+        },
+        else => @compileError("T must be an enum. Instead was given type " ++ @typeName(T)),
+    }
+}
+
+//TODO: optimize it possibly with wayyy less branching
+/// Returns the size in bytes of the value encoded using leb128
+pub fn lebEncodedSize(value: anytype) u32 {
+    return switch (@typeInfo(@TypeOf(value)).Int.signedness) {
+        .signed => lebISize(value),
+        .unsigned => lebUSize(value),
+    };
+}
+
+fn lebUSize(uint_value: anytype) u32 {
+    const T = @TypeOf(uint_value);
+    const U = if (@typeInfo(T).Int.bits < 8) u8 else T;
+    var value: U = @intCast(uint_value);
+
+    var total: u32 = 0;
+
+    while (true) : (total += 1) {
+        value >>= 7;
+        if (value == 0) {
+            total += 1;
+            break;
+        }
+    }
+
+    return total;
+}
+
+fn lebISize(int_value: anytype) u32 {
+    const T = @TypeOf(int_value);
+    const S = if (@typeInfo(T).Int.bits < 8) i8 else T;
+
+    var value: S = @intCast(int_value);
+    var total: u32 = 0;
+
+    while (true) : (total += 1) {
+        value >>= 6;
+        if (value == -1 or value == 0) {
+            total += 1;
+            break;
+        } else {
+            value >>= 1;
+        }
+    }
+
+    return total;
 }
 
 pub fn readInit(reader: anytype) !InitExpression {

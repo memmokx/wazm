@@ -1,6 +1,8 @@
 const std = @import("std");
+const leb = std.leb;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+
 const sections = @import("sections/sections.zig");
 const wasm = @import("wasm.zig");
 const Instruction = @import("Instruction.zig");
@@ -8,13 +10,11 @@ const Instruction = @import("Instruction.zig");
 pub fn SectionData(comptime T: type) type {
     return struct {
         data: ArrayList(T) = undefined,
-        len: usize = 0,
 
         const Self = @This();
 
         pub fn push(self: *Self, item: T) !void {
             try self.data.append(item);
-            self.len += 1;
         }
 
         pub fn initCapacity(self: *Self, allocator: Allocator, capacity: usize) !void {
@@ -23,6 +23,26 @@ pub fn SectionData(comptime T: type) type {
 
         pub fn deinit(self: Self) void {
             self.data.deinit();
+        }
+
+        /// Write the section according to he Wasm binary format
+        pub fn write(self: Self, writer: anytype, section_id: wasm.SectionId) !void {
+            try wasm.writeEnum(wasm.SectionId, writer, section_id);
+
+            var sections_size: u32 = 0;
+            const section_len: u32 = @intCast(self.data.items.len);
+
+            sections_size += wasm.lebEncodedSize(section_len);
+            for (self.data.items) |entry| {
+                sections_size += entry.encodedSize();
+            }
+
+            try leb.writeULEB128(writer, sections_size);
+            try leb.writeULEB128(writer, section_len);
+
+            for (self.data.items) |entry| {
+                try entry.write(writer);
+            }
         }
     };
 }
@@ -110,6 +130,14 @@ pub fn unmarshalWithReader(allocator: Allocator, reader: anytype) !Module {
     }
 
     return module;
+}
+
+pub fn marshalModule(self: Module, writer: anytype) !void {
+    try writer.writeAll("\x00asm");
+    try writer.writeInt(u32, 1, .Little);
+
+    try self.types.write(writer, .Type);
+    try self.imports.write(writer, .Import);
 }
 
 fn readTypesSection(module: *Module, allocator: Allocator, reader: anytype) !void {
