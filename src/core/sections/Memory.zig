@@ -3,7 +3,7 @@ const wasm = @import("../wasm.zig");
 limits: wasm.Limits,
 
 pub fn write(self: @This(), writer: anytype) !void {
-    try wasm.writeLimits(self.limits, writer);
+    try self.limits.write(writer);
 }
 
 pub fn encodedSize(self: @This()) u32 {

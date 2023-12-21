@@ -37,11 +37,11 @@ pub fn write(self: @This(), writer: anytype) !void {
         .table => |table| {
             try wasm.writeEnum(wasm.ExternalKind, writer, .table);
             try wasm.writeEnum(wasm.Reftype, writer, table.ref_type);
-            try wasm.writeLimits(table.limits, writer);
+            try table.limits.write(writer);
         },
         .memory => |memory| {
             try wasm.writeEnum(wasm.ExternalKind, writer, .memory);
-            try wasm.writeLimits(memory, writer);
+            try memory.write(writer);
         },
         .global => |global| {
             try wasm.writeEnum(wasm.ExternalKind, writer, .global);

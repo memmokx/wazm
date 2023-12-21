@@ -541,6 +541,16 @@ pub const Limits = struct {
     min: u32,
     max: ?u32,
 
+    pub fn write(self: Limits, writer: anytype) !void {
+        const flag: u1 = if (self.max == null) 0 else 1;
+
+        try leb.writeULEB128(writer, flag);
+        try leb.writeULEB128(writer, self.min);
+        if (self.max) |max| {
+            try leb.writeULEB128(writer, max);
+        }
+    }
+
     pub fn lebSize(self: Limits) u32 {
         if (self.max) |max| {
             return lebEncodedSize(self.min) + 1 + lebEncodedSize(max);
@@ -555,13 +565,6 @@ pub const InitExpression = union(enum) {
     /// Uses the value of a global at index `global_get`
     global_get: u32,
 
-    pub fn lebSize(self: InitExpression) u32 {
-        return switch (self) {
-            .i32_const => |value| lebEncodedSize(@as(u8, @intFromEnum(Opcode.i32_const))) + lebEncodedSize(value),
-            .global_get => |value| lebEncodedSize(@as(u8, @intFromEnum(Opcode.global_get))) + lebEncodedSize(value),
-        } + lebEncodedSize(@as(u8, @intFromEnum(Opcode.end)));
-    }
-
     pub fn write(self: InitExpression, writer: anytype) !void {
         switch (self) {
             .i32_const => |value| {
@@ -575,6 +578,13 @@ pub const InitExpression = union(enum) {
         }
 
         try writeEnum(Opcode, writer, .end);
+    }
+
+    pub fn lebSize(self: InitExpression) u32 {
+        return switch (self) {
+            .i32_const => |value| lebEncodedSize(@as(u8, @intFromEnum(Opcode.i32_const))) + lebEncodedSize(value),
+            .global_get => |value| lebEncodedSize(@as(u8, @intFromEnum(Opcode.global_get))) + lebEncodedSize(value),
+        } + lebEncodedSize(@as(u8, @intFromEnum(Opcode.end)));
     }
 };
 
@@ -608,17 +618,6 @@ pub fn readLimits(reader: anytype) !Limits {
         .min = min,
         .max = if (flag == 0) null else try readLeb(u32, reader),
     };
-}
-
-/// Writes the `Limits` type using leb encoding
-pub fn writeLimits(limits: Limits, writer: anytype) !void {
-    const flag: u1 = if (limits.max == null) 0 else 1;
-
-    try leb.writeULEB128(writer, flag);
-    try leb.writeULEB128(writer, limits.min);
-    if (limits.max) |max| {
-        try leb.writeULEB128(writer, max);
-    }
 }
 
 /// Writes an enum `T` using leb
