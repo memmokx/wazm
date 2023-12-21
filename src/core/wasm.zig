@@ -554,6 +554,28 @@ pub const InitExpression = union(enum) {
     i32_const: i32,
     /// Uses the value of a global at index `global_get`
     global_get: u32,
+
+    pub fn lebSize(self: InitExpression) u32 {
+        return switch (self) {
+            .i32_const => |value| lebEncodedSize(@as(u8, @intFromEnum(Opcode.i32_const))) + lebEncodedSize(value),
+            .global_get => |value| lebEncodedSize(@as(u8, @intFromEnum(Opcode.global_get))) + lebEncodedSize(value),
+        } + lebEncodedSize(@as(u8, @intFromEnum(Opcode.end)));
+    }
+
+    pub fn write(self: InitExpression, writer: anytype) !void {
+        switch (self) {
+            .i32_const => |value| {
+                try writeEnum(Opcode, writer, .i32_const);
+                try leb.writeILEB128(writer, value);
+            },
+            .global_get => |value| {
+                try writeEnum(Opcode, writer, .global_get);
+                try leb.writeULEB128(writer, value);
+            },
+        }
+
+        try writeEnum(Opcode, writer, .end);
+    }
 };
 
 pub const ExternalKind = std.wasm.ExternalKind;

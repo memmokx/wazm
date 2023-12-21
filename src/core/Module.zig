@@ -25,12 +25,15 @@ pub fn SectionData(comptime T: type) type {
             self.data.deinit();
         }
 
+        pub fn size(self: Self) usize {
+            return self.data.items.len;
+        }
         /// Write the section according to he Wasm binary format
         pub fn write(self: Self, writer: anytype, section_id: wasm.SectionId) !void {
             try wasm.writeEnum(wasm.SectionId, writer, section_id);
 
             var sections_size: u32 = 0;
-            const section_len: u32 = @intCast(self.data.items.len);
+            const section_len: u32 = @intCast(self.size());
 
             sections_size += wasm.lebEncodedSize(section_len);
             for (self.data.items) |entry| {
@@ -91,7 +94,7 @@ pub fn unmarshalWithReader(allocator: Allocator, reader: anytype) !Module {
                 errdefer module.funcs.deinit();
 
                 for (0..funcs_len) |_| {
-                    try module.funcs.push(.{ .type_idx = try wasm.readLeb(u32, reader) });
+                    try module.funcs.push(.{ .type_index = try wasm.readLeb(u32, reader) });
                 }
             },
             .Table => return error.UnimplementedSection,
@@ -138,6 +141,10 @@ pub fn marshalModule(self: Module, writer: anytype) !void {
 
     try self.types.write(writer, .Type);
     try self.imports.write(writer, .Import);
+    try self.funcs.write(writer, .Function);
+    try self.memories.write(writer, .Memory);
+    try self.globals.write(writer, .Global);
+    try self.exports.write(writer, .Export);
 }
 
 fn readTypesSection(module: *Module, allocator: Allocator, reader: anytype) !void {

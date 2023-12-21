@@ -5,7 +5,7 @@ const Instruction = @This();
 
 pub const Values = enum {
     none,
-    idx,
+    index,
     u32,
     i32,
     i64,
@@ -19,7 +19,7 @@ pub const Values = enum {
 
 pub const Value = union(Values) {
     none: void,
-    idx: u32,
+    index: u32,
     u32: u32,
     i32: i32,
     i64: i64,
@@ -52,7 +52,7 @@ fn decodeMisc(reader: anytype) !Value {
         .table_grow,
         .table_size,
         .table_fill,
-        => .{ .idx = try wasm.readLeb(u32, reader) },
+        => .{ .index = try wasm.readLeb(u32, reader) },
         else => .{ .none = {} },
     };
 }
@@ -98,7 +98,7 @@ pub fn fromOpcode(opcode: wasm.Opcode, allocator: std.mem.Allocator, reader: any
         .table_set,
         .table_get,
         .ref_func,
-        => .{ .idx = try wasm.readLeb(u32, reader) },
+        => .{ .index = try wasm.readLeb(u32, reader) },
         .call_indirect => .{ .multi = .{
             .x = try wasm.readLeb(u32, reader),
             .y = try wasm.readLeb(u32, reader),
