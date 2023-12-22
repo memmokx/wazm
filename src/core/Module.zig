@@ -322,7 +322,6 @@ fn readCodeSection(module: *Module, allocator: Allocator, internal_reader: anyty
     errdefer module.code.deinit();
 
     for (0..code_length) |_| {
-        // "the u32 size of the function code in bytes" we dont really care about that
         const bytes_left = try wasm.readLeb(u32, internal_reader);
 
         var limited_reader = std.io.limitedReader(internal_reader, @intCast(bytes_left));
