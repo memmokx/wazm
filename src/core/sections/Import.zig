@@ -82,3 +82,8 @@ pub fn encodedSize(self: @This()) u32 {
 
     return size;
 }
+
+pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+    allocator.free(self.module_name);
+    allocator.free(self.name);
+}

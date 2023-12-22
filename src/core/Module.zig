@@ -60,7 +60,10 @@ pub fn SectionData(comptime T: type) type {
             }
         }
 
-        pub fn deinit(self: Self) void {
+        pub fn deinit(self: Self, allocator: Allocator) void {
+            for (self.data.items) |*entry| {
+                entry.deinit(allocator);
+            }
             self.data.deinit();
         }
     };
@@ -121,7 +124,7 @@ pub fn unmarshalWithReader(allocator: Allocator, reader: anytype) !Module {
             .Function => {
                 const funcs_len = try wasm.readLeb(u32, reader);
                 try module.funcs.initCapacity(allocator, funcs_len);
-                errdefer module.funcs.deinit();
+                errdefer module.funcs.deinit(allocator);
 
                 for (0..funcs_len) |_| {
                     try module.funcs.push(.{ .type_index = try wasm.readLeb(u32, reader) });
@@ -130,7 +133,7 @@ pub fn unmarshalWithReader(allocator: Allocator, reader: anytype) !Module {
             .Table => {
                 const tables_len = try wasm.readLeb(u32, reader);
                 try module.tables.initCapacity(allocator, tables_len);
-                errdefer module.tables.deinit();
+                errdefer module.tables.deinit(allocator);
 
                 for (0..tables_len) |_| {
                     try module.tables.push(.{
@@ -142,7 +145,7 @@ pub fn unmarshalWithReader(allocator: Allocator, reader: anytype) !Module {
             .Memory => {
                 const memories_len = try wasm.readLeb(u32, reader);
                 try module.memories.initCapacity(allocator, memories_len);
-                errdefer module.memories.deinit();
+                errdefer module.memories.deinit(allocator);
 
                 for (0..memories_len) |_| {
                     try module.memories.push(.{ .limits = try wasm.readLimits(reader) });
@@ -151,7 +154,7 @@ pub fn unmarshalWithReader(allocator: Allocator, reader: anytype) !Module {
             .Global => {
                 const globals_len = try wasm.readLeb(u32, reader);
                 try module.globals.initCapacity(allocator, globals_len);
-                errdefer module.globals.deinit();
+                errdefer module.globals.deinit(allocator);
 
                 for (0..globals_len) |_| {
                     try module.globals.push(.{
@@ -166,7 +169,7 @@ pub fn unmarshalWithReader(allocator: Allocator, reader: anytype) !Module {
             .Element => {
                 const elements_len = try wasm.readLeb(u32, reader);
                 try module.elements.initCapacity(allocator, elements_len);
-                errdefer module.elements.deinit();
+                errdefer module.elements.deinit(allocator);
 
                 for (0..elements_len) |_| {
                     var elements: ?ArrayList(u32) = null;
@@ -191,7 +194,7 @@ pub fn unmarshalWithReader(allocator: Allocator, reader: anytype) !Module {
             .Data => {
                 const datas_len = try wasm.readLeb(u32, reader);
                 try module.datas.initCapacity(allocator, datas_len);
-                errdefer module.datas.deinit();
+                errdefer module.datas.deinit(allocator);
 
                 for (0..datas_len) |_| {
                     const index = try wasm.readLeb(u32, reader);
@@ -232,10 +235,23 @@ pub fn marshalModule(self: Module, writer: anytype) !void {
     try self.elements.write(writer, .Element);
 }
 
+pub fn deinit(self: *Module, allocator: Allocator) void {
+    self.types.deinit(allocator);
+    self.funcs.deinit(allocator);
+    self.tables.deinit(allocator);
+    self.memories.deinit(allocator);
+    self.globals.deinit(allocator);
+    self.elements.deinit(allocator);
+    self.datas.deinit(allocator);
+    self.imports.deinit(allocator);
+    self.exports.deinit(allocator);
+    self.code.deinit(allocator);
+}
+
 fn readTypesSection(module: *Module, allocator: Allocator, reader: anytype) !void {
     const len = try wasm.readLeb(u32, reader);
     try module.types.initCapacity(allocator, len);
-    errdefer module.types.deinit();
+    errdefer module.types.deinit(allocator);
 
     for (0..len) |_| {
         if (try reader.readByte() != std.wasm.function_type) return error.UnexpectedType;
@@ -263,7 +279,7 @@ fn readTypesSection(module: *Module, allocator: Allocator, reader: anytype) !voi
 fn readImportSection(module: *Module, allocator: Allocator, reader: anytype) !void {
     const len = try wasm.readLeb(u32, reader);
     try module.imports.initCapacity(allocator, len);
-    errdefer module.imports.deinit();
+    errdefer module.imports.deinit(allocator);
 
     for (0..len) |_| {
         const module_len = try wasm.readLeb(u32, reader);
@@ -299,7 +315,7 @@ fn readImportSection(module: *Module, allocator: Allocator, reader: anytype) !vo
 fn readExportsSection(module: *Module, allocator: Allocator, reader: anytype) !void {
     const exports_len = try wasm.readLeb(u32, reader);
     try module.exports.initCapacity(allocator, exports_len);
-    errdefer module.exports.deinit();
+    errdefer module.exports.deinit(allocator);
 
     for (0..exports_len) |_| {
         const name_len = try wasm.readLeb(u32, reader);
@@ -319,7 +335,7 @@ fn readExportsSection(module: *Module, allocator: Allocator, reader: anytype) !v
 fn readCodeSection(module: *Module, allocator: Allocator, internal_reader: anytype) !void {
     const code_length = try wasm.readLeb(u32, internal_reader);
     try module.code.initCapacity(allocator, code_length);
-    errdefer module.code.deinit();
+    errdefer module.code.deinit(allocator);
 
     for (0..code_length) |_| {
         const bytes_left = try wasm.readLeb(u32, internal_reader);

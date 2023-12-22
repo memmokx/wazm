@@ -1,4 +1,5 @@
-const leb = @import("std").leb;
+const std = @import("std");
+const leb = std.leb;
 const wasm = @import("../wasm.zig");
 
 name: []const u8,
@@ -23,4 +24,8 @@ pub fn encodedSize(self: @This()) u32 {
     size += wasm.lebEncodedSize(@as(u8, @intFromEnum(self.desc)));
 
     return size + wasm.lebEncodedSize(self.index);
+}
+
+pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+    allocator.free(self.name);
 }

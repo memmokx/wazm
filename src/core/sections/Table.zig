@@ -1,4 +1,5 @@
-const leb = @import("std").leb;
+const std = @import("std");
+const leb = std.leb;
 const wasm = @import("../wasm.zig");
 
 element_type: wasm.Reftype,
@@ -11,4 +12,9 @@ pub fn write(self: @This(), writer: anytype) !void {
 
 pub fn encodedSize(self: @This()) u32 {
     return self.limits.lebSize() + wasm.lebEncodedSize(@as(u8, @intFromEnum(self.element_type)));
+}
+
+pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+    _ = allocator;
+    _ = self;
 }

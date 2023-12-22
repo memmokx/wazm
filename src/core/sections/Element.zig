@@ -32,3 +32,10 @@ pub fn encodedSize(self: @This()) u32 {
 
     return size;
 }
+
+pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+    _ = allocator;
+    if (self.elements) |*list| {
+        list.deinit();
+    }
+}

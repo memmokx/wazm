@@ -10,3 +10,13 @@ pub const Local = struct {
 
 locals: ArrayList(Local),
 body: ArrayList(Instruction),
+
+pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+    for (self.body.items) |instruction| {
+        if (instruction.opcode == .br_table) {
+            allocator.free(instruction.value.table.table);
+        }
+    }
+    self.body.deinit();
+    self.locals.deinit();
+}
