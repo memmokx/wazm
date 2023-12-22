@@ -9,26 +9,38 @@ const Instruction = @import("Instruction.zig");
 
 pub fn SectionData(comptime T: type) type {
     return struct {
-        data: ArrayList(T) = undefined,
+        data: ArrayList(T),
 
         const Self = @This();
 
+        pub fn init(allocator: Allocator) Self {
+            return .{ .data = ArrayList(T).init(allocator) };
+        }
+
+        /// Returns the element at the current index
+        /// if not found returns `null`
+        pub fn at(self: Self, index: usize) ?T {
+            if (index > self.size()) {
+                return null;
+            }
+            return self.data.items[index];
+        }
+
+        /// Append the item to the internal `ArrayList`
         pub fn push(self: *Self, item: T) !void {
             try self.data.append(item);
         }
 
+        /// Init the internal `ArrayList` with the specified capacity
         pub fn initCapacity(self: *Self, allocator: Allocator, capacity: usize) !void {
             self.data = try ArrayList(T).initCapacity(allocator, capacity);
-        }
-
-        pub fn deinit(self: Self) void {
-            self.data.deinit();
         }
 
         pub fn size(self: Self) usize {
             return self.data.items.len;
         }
-        /// Write the section according to he Wasm binary format
+
+        /// Write the section according to the Wasm binary format
         pub fn write(self: Self, writer: anytype, section_id: wasm.SectionId) !void {
             try wasm.writeEnum(wasm.SectionId, writer, section_id);
 
@@ -47,24 +59,44 @@ pub fn SectionData(comptime T: type) type {
                 try entry.write(writer);
             }
         }
+
+        pub fn deinit(self: Self) void {
+            self.data.deinit();
+        }
     };
 }
 
 const Module = @This();
 
-version: u32,
-custom: []const sections.Custom = &.{},
-types: SectionData(sections.Type) = .{},
-funcs: SectionData(sections.Function) = .{},
-tables: SectionData(sections.Table) = .{},
-memories: SectionData(sections.Memory) = .{},
-globals: SectionData(sections.Global) = .{},
-elements: SectionData(sections.Element) = .{},
-datas: SectionData(sections.Data) = .{},
-imports: SectionData(sections.Import) = .{},
-exports: SectionData(sections.Export) = .{},
-code: SectionData(sections.Code) = .{},
-data_counts: SectionData(sections.DataCount) = .{},
+version: u32 = 1,
+//custom: []const sections.Custom = &.{},
+types: SectionData(sections.Type),
+funcs: SectionData(sections.Function),
+tables: SectionData(sections.Table),
+memories: SectionData(sections.Memory),
+globals: SectionData(sections.Global),
+elements: SectionData(sections.Element),
+datas: SectionData(sections.Data),
+imports: SectionData(sections.Import),
+exports: SectionData(sections.Export),
+code: SectionData(sections.Code),
+data_counts: SectionData(sections.DataCount),
+
+pub fn init(allocator: Allocator) Module {
+    return Module{
+        .types = SectionData(sections.Type).init(allocator),
+        .funcs = SectionData(sections.Function).init(allocator),
+        .tables = SectionData(sections.Table).init(allocator),
+        .memories = SectionData(sections.Memory).init(allocator),
+        .globals = SectionData(sections.Global).init(allocator),
+        .elements = SectionData(sections.Element).init(allocator),
+        .datas = SectionData(sections.Data).init(allocator),
+        .imports = SectionData(sections.Import).init(allocator),
+        .exports = SectionData(sections.Export).init(allocator),
+        .code = SectionData(sections.Code).init(allocator),
+        .data_counts = SectionData(sections.DataCount).init(allocator),
+    };
+}
 
 pub fn unmarshalWithReader(allocator: Allocator, reader: anytype) !Module {
     const magic = try reader.readBytesNoEof(4);
@@ -77,15 +109,13 @@ pub fn unmarshalWithReader(allocator: Allocator, reader: anytype) !Module {
         return error.InvalidVersion;
     }
 
-    var module: Module = .{ .version = version };
-
+    var module: Module = Module.init(allocator);
+    var timer = try std.time.Timer.start();
     while (wasm.readEnum(wasm.SectionId, reader)) |section_id| {
         const section_len = try wasm.readLeb(u32, reader);
 
-        std.log.debug("section: {any}, section length: 0x{x}", .{ section_id, section_len });
-
         switch (section_id) {
-            .Custom => return error.UnimplementedSection,
+            .Custom => try reader.skipBytes(section_len, .{}),
             .Type => try readTypesSection(&module, allocator, reader),
             .Import => try readImportSection(&module, allocator, reader),
             .Function => {
@@ -97,7 +127,18 @@ pub fn unmarshalWithReader(allocator: Allocator, reader: anytype) !Module {
                     try module.funcs.push(.{ .type_index = try wasm.readLeb(u32, reader) });
                 }
             },
-            .Table => return error.UnimplementedSection,
+            .Table => {
+                const tables_len = try wasm.readLeb(u32, reader);
+                try module.tables.initCapacity(allocator, tables_len);
+                errdefer module.tables.deinit();
+
+                for (0..tables_len) |_| {
+                    try module.tables.push(.{
+                        .element_type = try wasm.readEnum(wasm.Reftype, reader),
+                        .limits = try wasm.readLimits(reader),
+                    });
+                }
+            },
             .Memory => {
                 const memories_len = try wasm.readLeb(u32, reader);
                 try module.memories.initCapacity(allocator, memories_len);
@@ -122,11 +163,53 @@ pub fn unmarshalWithReader(allocator: Allocator, reader: anytype) !Module {
             },
             .Export => try readExportsSection(&module, allocator, reader),
             .Start => return error.UnimplementedSection,
-            .Element => return error.UnimplementedSection,
+            .Element => {
+                const elements_len = try wasm.readLeb(u32, reader);
+                try module.elements.initCapacity(allocator, elements_len);
+                errdefer module.elements.deinit();
+
+                for (0..elements_len) |_| {
+                    var elements: ?ArrayList(u32) = null;
+                    const table_index = try wasm.readLeb(u32, reader);
+                    const offset = try wasm.readInit(reader);
+
+                    const table = module.tables.at(table_index) orelse return error.OutOfBoundsTable;
+                    if (table.element_type == .funcref) {
+                        const len = try wasm.readLeb(u32, reader);
+                        elements = try ArrayList(u32).initCapacity(allocator, len);
+                        errdefer elements.?.deinit();
+
+                        for (0..len) |_| {
+                            try elements.?.append(try wasm.readLeb(u32, reader));
+                        }
+                    }
+
+                    try module.elements.push(.{ .index = table_index, .offset = offset, .elements = elements });
+                }
+            },
             .Code => try readCodeSection(&module, allocator, reader),
-            .Data => return error.UnimplementedSection,
+            .Data => {
+                const datas_len = try wasm.readLeb(u32, reader);
+                try module.datas.initCapacity(allocator, datas_len);
+                errdefer module.datas.deinit();
+
+                for (0..datas_len) |_| {
+                    const index = try wasm.readLeb(u32, reader);
+                    const offset = try wasm.readInit(reader);
+                    const len = try wasm.readLeb(u32, reader);
+
+                    var raw_data = try allocator.alloc(u8, len);
+                    errdefer allocator.free(raw_data);
+
+                    try reader.readNoEof(raw_data);
+
+                    try module.datas.push(.{ .index = index, .offset = offset, .data = raw_data });
+                }
+            },
             .DataCount => return error.UnimplementedSection,
         }
+
+        std.debug.print("section: {any}, section length: 0x{x} took: {}us\n", .{ section_id, section_len, timer.lap() / std.time.ns_per_us });
     } else |err| switch (err) {
         error.EndOfStream => {},
         else => |e| return e,
@@ -142,9 +225,11 @@ pub fn marshalModule(self: Module, writer: anytype) !void {
     try self.types.write(writer, .Type);
     try self.imports.write(writer, .Import);
     try self.funcs.write(writer, .Function);
+    try self.tables.write(writer, .Table);
     try self.memories.write(writer, .Memory);
     try self.globals.write(writer, .Global);
     try self.exports.write(writer, .Export);
+    try self.elements.write(writer, .Element);
 }
 
 fn readTypesSection(module: *Module, allocator: Allocator, reader: anytype) !void {
@@ -231,15 +316,17 @@ fn readExportsSection(module: *Module, allocator: Allocator, reader: anytype) !v
     }
 }
 
-fn readCodeSection(module: *Module, allocator: Allocator, reader: anytype) !void {
-    const code_length = try wasm.readLeb(u32, reader);
+fn readCodeSection(module: *Module, allocator: Allocator, internal_reader: anytype) !void {
+    const code_length = try wasm.readLeb(u32, internal_reader);
     try module.code.initCapacity(allocator, code_length);
     errdefer module.code.deinit();
 
     for (0..code_length) |_| {
         // "the u32 size of the function code in bytes" we dont really care about that
-        _ = try wasm.readLeb(u32, reader);
+        const bytes_left = try wasm.readLeb(u32, internal_reader);
 
+        var limited_reader = std.io.limitedReader(internal_reader, @intCast(bytes_left));
+        var reader = limited_reader.reader();
         const locals_len = try wasm.readLeb(u32, reader);
         var locals = try ArrayList(sections.Code.Local).initCapacity(allocator, locals_len);
         errdefer locals.deinit();
@@ -254,10 +341,8 @@ fn readCodeSection(module: *Module, allocator: Allocator, reader: anytype) !void
         var instructions = ArrayList(Instruction).init(allocator);
         errdefer instructions.deinit();
 
-        while (wasm.readEnum(wasm.Opcode, reader)) |opcode| {
+        while (wasm.readOpcode(reader)) |opcode| {
             const instruction = try Instruction.fromOpcode(opcode, allocator, reader);
-            if (instruction.opcode == .end)
-                break;
             try instructions.append(instruction);
         } else |err| switch (err) {
             error.EndOfStream => {

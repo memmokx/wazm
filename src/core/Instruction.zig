@@ -15,6 +15,12 @@ pub const Values = enum {
     block_type,
     mem_arg,
     multi,
+    table,
+};
+
+pub const MemArg = struct {
+    @"align": u32,
+    offset: u32,
 };
 
 pub const Value = union(Values) {
@@ -27,13 +33,14 @@ pub const Value = union(Values) {
     f64: f64,
     ref_type: wasm.Reftype,
     block_type: wasm.BlockType,
-    mem_arg: struct {
-        @"align": u32,
-        offset: u32,
-    },
+    mem_arg: MemArg,
     multi: struct {
         x: u32,
         y: u32,
+    },
+    table: struct {
+        table: []const u32,
+        default: u32,
     },
 };
 
@@ -46,13 +53,13 @@ fn decodeMisc(reader: anytype) !Value {
             .x = try wasm.readLeb(u32, reader),
             .y = try wasm.readLeb(u32, reader),
         } },
-        .memory_init,
         .data_drop,
         .elem_drop,
         .table_grow,
         .table_size,
         .table_fill,
         => .{ .index = try wasm.readLeb(u32, reader) },
+        .memory_init, .memory_copy, .memory_fill => return error.UnimplementedInstruction,
         else => .{ .none = {} },
     };
 }
@@ -81,6 +88,18 @@ fn decodeSimd(allocator: std.mem.Allocator, reader: anytype) !Value {
     };
 }
 
+fn readTable(allocator: std.mem.Allocator, reader: anytype) !Value {
+    const len = try wasm.readLeb(u32, reader);
+    var indices = try std.ArrayList(u32).initCapacity(allocator, len);
+    errdefer indices.deinit();
+
+    for (0..len) |_| {
+        try indices.append(try wasm.readLeb(u32, reader));
+    }
+
+    return .{ .table = .{ .table = try indices.toOwnedSlice(), .default = try wasm.readLeb(u32, reader) } };
+}
+
 pub fn fromOpcode(opcode: wasm.Opcode, allocator: std.mem.Allocator, reader: anytype) !Instruction {
     var instruction: Instruction = .{
         .opcode = opcode,
@@ -88,22 +107,34 @@ pub fn fromOpcode(opcode: wasm.Opcode, allocator: std.mem.Allocator, reader: any
     };
 
     instruction.value = switch (opcode) {
+        //Control Instructions
+        .@"unreachable", .nop, .@"return" => .{ .none = {} },
         .block, .loop, .@"if" => .{ .block_type = try wasm.readEnum(wasm.BlockType, reader) }, // blocktype
-        .call,
+        .br, .br_if, .call => .{ .index = try wasm.readLeb(u32, reader) },
+        .br_table => try readTable(allocator, reader),
+        .call_indirect => .{ .multi = .{
+            .x = try wasm.readLeb(u32, reader),
+            .y = try wasm.readLeb(u32, reader),
+        } },
+        // Reference Instructions
+        .ref_null => .{ .ref_type = try wasm.readEnum(wasm.Reftype, reader) },
+        .ref_is_null => .{ .none = {} },
+        .ref_func => .{ .index = try wasm.readLeb(u32, reader) },
+        // Parametric Instructions
+        .drop, .select => .{ .none = {} },
+        //TODO: 0x1C
+        // Variable Instructions
         .local_get,
         .local_set,
         .local_tee,
         .global_get,
         .global_set,
-        .table_set,
-        .table_get,
-        .ref_func,
         => .{ .index = try wasm.readLeb(u32, reader) },
-        .call_indirect => .{ .multi = .{
-            .x = try wasm.readLeb(u32, reader),
-            .y = try wasm.readLeb(u32, reader),
-        } },
-        .ref_null => .{ .ref_type = try wasm.readEnum(wasm.Reftype, reader) },
+        // Table Instructions
+        .table_get,
+        .table_set,
+        => .{ .index = try wasm.readLeb(u32, reader) },
+        // Memory Instructions
         .i32_load,
         .i64_load,
         .f32_load,
@@ -131,12 +162,15 @@ pub fn fromOpcode(opcode: wasm.Opcode, allocator: std.mem.Allocator, reader: any
             .@"align" = try wasm.readLeb(u32, reader),
             .offset = try wasm.readLeb(u32, reader),
         } },
+        .memory_size, .memory_grow => blk: {
+            _ = try reader.readByte();
+            break :blk .{ .none = {} };
+        },
+        // Numeric Instructions
         .i32_const => .{ .i32 = try wasm.readLeb(i32, reader) },
         .i64_const => .{ .i64 = try wasm.readLeb(i64, reader) },
         .f32_const => .{ .f32 = @bitCast(try wasm.readLeb(u32, reader)) },
         .f64_const => .{ .f64 = @bitCast(try wasm.readLeb(u64, reader)) },
-        // 0x1C select t*
-        //@as(wasm.Opcode, @enumFromInt(0x1C)) => {},
         .misc_prefix => try decodeMisc(reader),
         .simd_prefix => try decodeSimd(allocator, reader),
         .atomics_prefix => unreachable,

@@ -600,6 +600,17 @@ pub fn readLeb(comptime T: type, reader: anytype) !T {
     };
 }
 
+pub fn readOpcode(reader: anytype) !Opcode {
+    return @enumFromInt(try reader.readByte());
+}
+
+pub fn disallowEndInstruction(opcode: Opcode) bool {
+    return switch (opcode) {
+        .block, .loop, .@"if", .@"else" => false,
+        else => true,
+    };
+}
+
 /// Reads an enum type from the given reader.
 /// Asserts `T` is an enum
 pub fn readEnum(comptime T: type, reader: anytype) !T {
